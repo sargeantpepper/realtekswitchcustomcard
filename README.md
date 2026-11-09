@@ -8,6 +8,14 @@ The preview is rendered from sample data.
 
 ## Install
 
+### HACS
+
+1. In HACS open the menu, choose Custom repositories, and add `https://github.com/sargeantpepper/realtekswitchcustomcard` with the type Dashboard.
+2. Find "Keeplink Switch Card" in HACS and download it. HACS adds the dashboard resource for you.
+3. Add the card to a dashboard from the card picker.
+
+### Manual
+
 1. Copy `keeplink-switch-card.js` to `/config/www/`.
 2. In Home Assistant go to Settings → Dashboards → Resources and add `/local/keeplink-switch-card.js` as a JavaScript module.
 3. Add the card to a dashboard, either by picking "Keeplink Switch Card" in the card picker or in YAML:

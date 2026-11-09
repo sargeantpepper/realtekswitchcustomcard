@@ -14,6 +14,7 @@
  *   ports: 8                # number of RJ45 ports (numbered from 1)
  *   sfp_ports: 1            # SFP ports, numbered after the RJ45 ports
  *   poe_budget: 120         # watts, sets the scale of the PoE bar
+ *   reboot_entity: button.my_switch_reboot_device   # default: button.<prefix>_reboot_device
  *   details_collapsed: false  # start with the port statistics folded away
  *   port_names:             # friendly names shown in the detail panel
  *     1: NAS
@@ -27,9 +28,13 @@
  *   sensor.<prefix>_port_<n>_poe_power
  *   sensor.<prefix>_poe_total_power
  *   button.<prefix>_clear_statistics
+ *   button.<prefix>_reboot_device          (or the entity set in reboot_entity)
+ *
+ * The PoE LEDs, wattage and load bar are hidden automatically when the switch
+ * exposes no PoE entities or attributes.
  */
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -130,8 +135,10 @@ const STYLE = `
   .stat .v { font-size: 14px; font-variant-numeric: tabular-nums; }
   .stat .v.bad { color: var(--error-color, #c0392b); font-weight: 600; }
 
-  .foot { display: flex; align-items: center; gap: 16px; padding: 12px 16px; }
-  .poebox { flex: 1; min-width: 0; }
+  .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 12px 16px; }
+  .poebox { flex: 1 1 180px; min-width: 0; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+  .nopoe .led.pwr { display: none; }
   .poetop { display: flex; justify-content: space-between; font-size: 12px; color: var(--secondary-text-color); margin-bottom: 4px; }
   .poetop b { color: var(--primary-text-color); font-size: 14px; font-variant-numeric: tabular-nums; }
   .bar { height: 8px; border-radius: 4px; background: var(--divider-color, rgba(127,127,127,.3)); overflow: hidden; }
@@ -191,6 +198,7 @@ class KeeplinkSwitchCard extends HTMLElement {
       poe_budget: 120,
       port_names: {},
       details_collapsed: false,
+      reboot_entity: '',
       ...(config || {}),
     };
     this._open = !this._config.details_collapsed;
@@ -220,6 +228,10 @@ class KeeplinkSwitchCard extends HTMLElement {
     };
   }
 
+  _rebootId() {
+    return this._config.reboot_entity || `button.${this._config.prefix}_reboot_device`;
+  }
+
   _portNumbers() {
     const total = Number(this._config.ports) + Number(this._config.sfp_ports);
     return Array.from({ length: total }, (_, i) => i + 1);
@@ -242,6 +254,7 @@ class KeeplinkSwitchCard extends HTMLElement {
     const names = this._config.port_names || {};
     return {
       n, ids, sfp, attrs, admin, up, disabled, unavail, poeW, status,
+      hasPoe: !!poe || attrs.poe_power_w !== undefined,
       label: sfp ? 'SFP+' : `P${n}`,
       name: names[n] || names[String(n)] || '',
     };
@@ -250,7 +263,7 @@ class KeeplinkSwitchCard extends HTMLElement {
   _signature() {
     const s = this._hass.states;
     const p = this._config.prefix;
-    const ids = [`sensor.${p}_poe_total_power`, `button.${p}_clear_statistics`];
+    const ids = [`sensor.${p}_poe_total_power`, `button.${p}_clear_statistics`, this._rebootId()];
     this._portNumbers().forEach((n) => ids.push(...Object.values(this._ids(n))));
     return ids.map((id) => (s[id] ? s[id].last_updated : 'x')).join('|') + `|${this._selected}|${this._armed}|${this._open}`;
   }
@@ -268,6 +281,9 @@ class KeeplinkSwitchCard extends HTMLElement {
     const totalObj = this._hass.states[`sensor.${cfg.prefix}_poe_total_power`];
     let total = totalObj ? num(totalObj.state) : null;
     if (total === null) total = ports.reduce((a, p) => a + (p.poeW || 0), 0);
+    const hasPoe = !!totalObj || ports.some((p) => p.hasPoe);
+    const hasClear = !!this._hass.states[`button.${cfg.prefix}_clear_statistics`];
+    const hasReboot = !!this._hass.states[this._rebootId()];
     const budget = Number(cfg.poe_budget) || 120;
     const pct = Math.max(0, Math.min(100, (total / budget) * 100));
     const barColor =
@@ -279,7 +295,7 @@ class KeeplinkSwitchCard extends HTMLElement {
         <span class="lbl">${p.label}</span>
         ${p.sfp ? SFP_SVG : RJ45_SVG}
         <span class="spd">${p.up ? esc(shortSpeed(p.attrs.speed)) : p.disabled ? 'off' : '&nbsp;'}</span>
-        <span class="poe">${p.poeW > 0 ? p.poeW.toFixed(1) + 'W' : '&nbsp;'}</span>
+        ${hasPoe ? `<span class="poe">${p.poeW > 0 ? p.poeW.toFixed(1) + 'W' : '&nbsp;'}</span>` : ''}
       </button>`;
 
     const rj = ports.filter((p) => !p.sfp).map(portHtml).join('');
@@ -290,19 +306,28 @@ class KeeplinkSwitchCard extends HTMLElement {
       <ha-card>
         <div class="hdr">
           <div class="title">${esc(cfg.title)}</div>
-          <div class="sum">${upCount}/${ports.length} up · ${total.toFixed(1)} W</div>
+          <div class="sum">${upCount}/${ports.length} up${hasPoe ? ` · ${total.toFixed(1)} W` : ''}</div>
         </div>
-        <div class="face">${rj}${sfp ? '<div class="sep"></div>' + sfp : ''}</div>
+        <div class="face ${hasPoe ? '' : 'nopoe'}">${rj}${sfp ? '<div class="sep"></div>' + sfp : ''}</div>
         <div class="detail">${this._detailHtml(ports.find((p) => p.n === this._selected))}</div>
+        ${hasPoe || hasClear || hasReboot ? `
         <div class="foot">
+          ${hasPoe ? `
           <div class="poebox">
             <div class="poetop"><span>Total PoE load</span><span><b>${total.toFixed(1)} W</b> / ${budget} W</span></div>
             <div class="bar"><div class="fill" style="width:${pct}%;background:${barColor}"></div></div>
+          </div>` : ''}
+          <div class="btns">
+            ${hasClear ? `
+            <button class="btn ${this._armed === 'clear' ? 'armed' : ''}" data-action="clear">
+              ${this._armed === 'clear' ? 'Tap again to clear' : 'Clear port stats'}
+            </button>` : ''}
+            ${hasReboot ? `
+            <button class="btn ${this._armed === 'reboot' ? 'armed' : ''}" data-action="reboot">
+              ${this._armed === 'reboot' ? 'Tap again to reboot' : 'Reboot switch'}
+            </button>` : ''}
           </div>
-          <button class="btn ${this._armed === 'clear' ? 'armed' : ''}" data-action="clear">
-            ${this._armed === 'clear' ? 'Tap again to clear' : 'Clear port stats'}
-          </button>
-        </div>
+        </div>` : ''}
       </ha-card>`;
   }
 
@@ -378,6 +403,13 @@ class KeeplinkSwitchCard extends HTMLElement {
       } else {
         this._arm('clear');
       }
+    } else if (actionEl && actionEl.dataset.action === 'reboot') {
+      if (this._armed === 'reboot') {
+        this._hass.callService('button', 'press', { entity_id: this._rebootId() });
+        this._arm(null);
+      } else {
+        this._arm('reboot');
+      }
     } else if (actionEl && actionEl.dataset.action === 'toggle' && this._selected) {
       const p = this._port(this._selected);
       if (p.disabled) {
@@ -405,10 +437,12 @@ const EDITOR_LABELS = {
   sfp_ports: 'SFP ports',
   poe_budget: 'PoE budget (W)',
   details_collapsed: 'Start with port statistics collapsed',
+  reboot_entity: 'Reboot button entity',
 };
 
 const EDITOR_HELP = {
   prefix: 'Entities are looked up as binary_sensor.<prefix>_port_1_link and so on.',
+  reboot_entity: 'Leave empty to use button.<prefix>_reboot_device. The button is hidden if the entity does not exist.',
 };
 
 const EDITOR_SCHEMA = [
@@ -417,6 +451,7 @@ const EDITOR_SCHEMA = [
   { name: 'ports', selector: { number: { min: 0, max: 48, step: 1, mode: 'box' } } },
   { name: 'sfp_ports', selector: { number: { min: 0, max: 8, step: 1, mode: 'box' } } },
   { name: 'poe_budget', selector: { number: { min: 1, max: 2000, step: 1, mode: 'box' } } },
+  { name: 'reboot_entity', selector: { entity: { domain: 'button' } } },
   { name: 'details_collapsed', selector: { boolean: {} } },
 ];
 
@@ -461,7 +496,9 @@ class KeeplinkSwitchCardEditor extends HTMLElement {
     this._main.schema = EDITOR_SCHEMA;
     this._main.addEventListener('value-changed', (e) => {
       e.stopPropagation();
-      this._emit({ ...this._config, ...e.detail.value });
+      const next = { ...this._config, ...e.detail.value };
+      if (!e.detail.value.reboot_entity) delete next.reboot_entity;
+      this._emit(next);
     });
     this.querySelector('.ksc-main').appendChild(this._main);
 
@@ -487,6 +524,7 @@ class KeeplinkSwitchCardEditor extends HTMLElement {
     Object.keys(EDITOR_DEFAULTS).forEach((k) => {
       if (c[k] !== undefined) data[k] = c[k];
     });
+    if (c.reboot_entity) data.reboot_entity = c.reboot_entity;
     this._main.hass = this._hass;
     this._main.data = data;
 

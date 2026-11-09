@@ -1,6 +1,6 @@
 # Keeplink Switch Card
 
-A Home Assistant dashboard card that shows a Keeplink 2.5G managed PoE switch as a faceplate: link state, speed and PoE draw per port, a collapsible details panel for the selected port, total PoE load, and a button to clear port statistics.
+A Home Assistant dashboard card that shows a Keeplink 2.5G managed PoE switch as a faceplate: link state, speed and PoE draw per port, a collapsible details panel for the selected port, total PoE load, and buttons to clear port statistics and reboot the switch. On a switch without PoE the PoE LEDs, wattage and load bar are hidden automatically.
 
 ![Card preview with the port details expanded and collapsed](images/preview.png)
 
@@ -35,6 +35,7 @@ All options are optional. They can be set in the dashboard's visual editor or in
 | `ports` | `8` | Number of RJ45 ports, numbered from 1 |
 | `sfp_ports` | `1` | Number of SFP ports, numbered after the RJ45 ports |
 | `poe_budget` | `120` | Watts, sets the scale of the PoE bar |
+| `reboot_entity` | `button.<prefix>_reboot_device` | Button entity that reboots the switch. The button is hidden if the entity does not exist |
 | `details_collapsed` | `false` | Start with the port statistics folded away |
 | `port_names` | none | Map of port number to a friendly name |
 
@@ -55,3 +56,4 @@ port_names:
 | `sensor.<prefix>_port_<n>_poe_power` | PoE draw per port |
 | `sensor.<prefix>_poe_total_power` | Total PoE load |
 | `button.<prefix>_clear_statistics` | Clear port statistics |
+| `button.<prefix>_reboot_device` or `reboot_entity` | Reboot the switch |

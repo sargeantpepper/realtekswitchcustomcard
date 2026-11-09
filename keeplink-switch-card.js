@@ -29,7 +29,7 @@
  *   button.<prefix>_clear_statistics
  */
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -172,6 +172,10 @@ class KeeplinkSwitchCard extends HTMLElement {
     this._armTimer = null;
     this._sig = '';
     this.shadowRoot.addEventListener('click', (e) => this._onClick(e));
+  }
+
+  static getConfigElement() {
+    return document.createElement('keeplink-switch-card-editor');
   }
 
   static getStubConfig() {
@@ -392,6 +396,131 @@ class KeeplinkSwitchCard extends HTMLElement {
   }
 }
 
+/* ---------- Visual editor ---------- */
+
+const EDITOR_LABELS = {
+  title: 'Title',
+  prefix: 'Entity prefix',
+  ports: 'RJ45 ports',
+  sfp_ports: 'SFP ports',
+  poe_budget: 'PoE budget (W)',
+  details_collapsed: 'Start with port statistics collapsed',
+};
+
+const EDITOR_HELP = {
+  prefix: 'Entities are looked up as binary_sensor.<prefix>_port_1_link and so on.',
+};
+
+const EDITOR_SCHEMA = [
+  { name: 'title', selector: { text: {} } },
+  { name: 'prefix', selector: { text: {} } },
+  { name: 'ports', selector: { number: { min: 0, max: 48, step: 1, mode: 'box' } } },
+  { name: 'sfp_ports', selector: { number: { min: 0, max: 8, step: 1, mode: 'box' } } },
+  { name: 'poe_budget', selector: { number: { min: 1, max: 2000, step: 1, mode: 'box' } } },
+  { name: 'details_collapsed', selector: { boolean: {} } },
+];
+
+const EDITOR_DEFAULTS = {
+  title: 'Keeplink 2.5G Managed Switch',
+  prefix: 'keeplink',
+  ports: 8,
+  sfp_ports: 1,
+  poe_budget: 120,
+  details_collapsed: false,
+};
+
+class KeeplinkSwitchCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...(config || {}) };
+    this._update();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._main) {
+      this._main.hass = hass;
+      this._names.hass = hass;
+    }
+  }
+
+  connectedCallback() {
+    this._update();
+  }
+
+  _build() {
+    this.innerHTML = `
+      <div class="ksc-main"></div>
+      <div style="margin:20px 0 8px;font-weight:500">Port names</div>
+      <div style="margin-bottom:8px;font-size:12px;color:var(--secondary-text-color)">
+        Optional. Shown in the details panel when a port is selected.</div>
+      <div class="ksc-names"></div>`;
+
+    this._main = document.createElement('ha-form');
+    this._main.computeLabel = (f) => EDITOR_LABELS[f.name] || f.name;
+    this._main.computeHelper = (f) => EDITOR_HELP[f.name] || '';
+    this._main.schema = EDITOR_SCHEMA;
+    this._main.addEventListener('value-changed', (e) => {
+      e.stopPropagation();
+      this._emit({ ...this._config, ...e.detail.value });
+    });
+    this.querySelector('.ksc-main').appendChild(this._main);
+
+    this._names = document.createElement('ha-form');
+    this._names.computeLabel = (f) => f.label;
+    this._names.addEventListener('value-changed', (e) => {
+      e.stopPropagation();
+      const names = {};
+      Object.entries(e.detail.value || {}).forEach(([k, v]) => {
+        const text = v == null ? '' : String(v).trim();
+        if (text) names[k.replace('p', '')] = text;
+      });
+      this._emit({ ...this._config, port_names: names });
+    });
+    this.querySelector('.ksc-names').appendChild(this._names);
+  }
+
+  _update() {
+    if (!this._config || !this.isConnected) return;
+    if (!this._main) this._build();
+    const c = this._config;
+    const data = { ...EDITOR_DEFAULTS };
+    Object.keys(EDITOR_DEFAULTS).forEach((k) => {
+      if (c[k] !== undefined) data[k] = c[k];
+    });
+    this._main.hass = this._hass;
+    this._main.data = data;
+
+    const rj = Number(data.ports) || 0;
+    const total = rj + (Number(data.sfp_ports) || 0);
+    const schemaKey = `${rj}/${total}`;
+    if (schemaKey !== this._schemaKey) {
+      this._schemaKey = schemaKey;
+      this._names.schema = Array.from({ length: total }, (_, i) => ({
+        name: `p${i + 1}`,
+        label: i + 1 > rj ? `SFP+ port ${i + 1}` : `Port ${i + 1}`,
+        selector: { text: {} },
+      }));
+    }
+    const names = c.port_names || {};
+    const nameData = {};
+    for (let n = 1; n <= total; n += 1) nameData[`p${n}`] = names[n] || names[String(n)] || '';
+    this._names.hass = this._hass;
+    this._names.data = nameData;
+  }
+
+  _emit(config) {
+    const out = { ...config };
+    if (out.port_names && !Object.keys(out.port_names).length) delete out.port_names;
+    this._config = out;
+    this._update();
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: out }, bubbles: true, composed: true }));
+  }
+}
+
+if (!customElements.get('keeplink-switch-card-editor')) {
+  customElements.define('keeplink-switch-card-editor', KeeplinkSwitchCardEditor);
+}
+
 if (!customElements.get('keeplink-switch-card')) {
   customElements.define('keeplink-switch-card', KeeplinkSwitchCard);
 }
@@ -400,6 +529,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'keeplink-switch-card',
   name: 'Keeplink Switch Card',
+  preview: true,
   description: 'Faceplate view of a Keeplink managed PoE switch with per-port details.',
 });
 

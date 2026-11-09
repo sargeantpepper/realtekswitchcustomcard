@@ -10,7 +10,7 @@ The preview is rendered from sample data.
 
 1. Copy `keeplink-switch-card.js` to `/config/www/`.
 2. In Home Assistant go to Settings → Dashboards → Resources and add `/local/keeplink-switch-card.js` as a JavaScript module.
-3. Add the card to a dashboard:
+3. Add the card to a dashboard, either by picking "Keeplink Switch Card" in the card picker or in YAML:
 
 ```yaml
 type: custom:keeplink-switch-card
@@ -18,7 +18,7 @@ type: custom:keeplink-switch-card
 
 ## Options
 
-All options are optional.
+All options are optional. They can be set in the dashboard's visual editor or in YAML.
 
 | Option | Default | Description |
 | --- | --- | --- |
